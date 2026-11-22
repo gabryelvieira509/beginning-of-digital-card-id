@@ -1,0 +1,181 @@
+
+#include <WiFi.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <time.h>
+
+// ---------- OLED ----------
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+Adafruit_SSD1306 display(128, 64, &Wire, -1);
+
+// ---------- WIFI ----------
+const char* ssid = "iPhone";
+const char* password = "Deni-1988";
+
+// ---------- TIME ----------
+const char* ntpServer = "pool.ntp.org";
+const char* timeZone = "EST5EDT,M3.2.0,M11.1.0";
+
+bool timeSynced = false;
+unsigned long lastReconnect = 0;
+
+// ---------- DISPLAY MESSAGE ----------
+void showMessage(String message) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 20);
+  display.println(message);
+  display.display();
+}
+
+// ---------- WIFI CONNECTION ----------
+bool connectWiFi() {
+  showMessage("Connecting WiFi...");
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+
+  Serial.println("Connecting to WiFi...");
+
+  int attempts = 0;
+
+  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+    delay(1000);
+
+    Serial.print("WiFi Status: ");
+    Serial.println(WiFi.status());
+
+    attempts++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("WiFi Connected!");
+    Serial.print("IP: ");
+    Serial.println(WiFi.localIP());
+
+    showMessage("WiFi Connected!");
+    delay(1000);
+    return true;
+  }
+
+  Serial.println("WiFi Failed!");
+  showMessage("WiFi Failed!");
+  delay(1000);
+  return false;
+}
+
+// ---------- TIME SYNC ----------
+void syncTime() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  showMessage("Syncing time...");
+
+  configTzTime(timeZone, ntpServer);
+
+  struct tm timeinfo;
+
+  if (getLocalTime(&timeinfo, 15000)) {
+    Serial.println("Time synchronized!");
+    timeSynced = true;
+  } else {
+    Serial.println("Time sync failed!");
+  }
+}
+
+// ---------- SETUP ----------
+void setup() {
+  Serial.begin(115200);
+
+  Wire.begin(21, 22);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("OLED not found!");
+    while (true);
+  }
+
+  showMessage("Starting ESP32...");
+  delay(1000);
+
+  if (connectWiFi()) {
+    syncTime();
+  }
+}
+
+// ---------- LOOP ----------
+void loop() {
+
+  // Retry WiFi every 30 seconds
+  if (WiFi.status() != WL_CONNECTED &&
+      millis() - lastReconnect >= 30000) {
+
+    lastReconnect = millis();
+
+    if (connectWiFi()) {
+      syncTime();
+    }
+  }
+
+  struct tm timeinfo;
+
+  if (!timeSynced) {
+    if (WiFi.status() == WL_CONNECTED) {
+      syncTime();
+    } else {
+      showMessage("Waiting for WiFi...");
+    }
+
+    delay(1000);
+    return;
+  }
+
+  if (!getLocalTime(&timeinfo, 1000)) {
+    showMessage("Waiting for time...");
+    delay(1000);
+    return;
+  }
+
+  char timeString[12];
+  char dateString[20];
+
+  strftime(timeString, sizeof(timeString),
+           "%H:%M:%S", &timeinfo);
+
+  strftime(dateString, sizeof(dateString),
+           "%m/%d/%Y", &timeinfo);
+
+  display.clearDisplay();
+
+  // Title
+  display.setTextSize(1);
+  display.setCursor(28, 0);
+  display.println("Gabryel's clock");
+
+  // Time
+  display.setTextSize(2);
+  display.setCursor(16, 20);
+  display.println(timeString);
+
+  // Date
+  display.setTextSize(1);
+  display.setCursor(35, 48);
+  display.println(dateString);
+
+  // WiFi indicator
+  display.setCursor(0, 56);
+
+  if (WiFi.status() == WL_CONNECTED) {
+    display.print("WiFi OK");
+  } else {
+    display.print("Offline");
+  }
+
+  display.display();
+
+  delay(1000);
+}
